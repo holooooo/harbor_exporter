@@ -13,10 +13,10 @@ LDFLAGS=-ldflags "-X=github.com/prometheus/common/version.Version=$(VERSION) \
 
 
 build:
-	@go build $(LDFLAGS) -o releases/harbor_exporter
+	@go build $(LDFLAGS) -o releases/harbor_exporter -mod vendor
 
 dockerbuild:
-	docker build -t c4po/harbor-exporter .
+	docker build --network host -t reg.ebcpaas.com/xiechuyu/harbor_exporter .
 
 dockerpush:
 	docker push c4po/harbor-exporter

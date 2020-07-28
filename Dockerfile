@@ -5,14 +5,16 @@ ENV GO111MODULE=on \
   GOOS=linux \
   GOARCH=amd64
 
-RUN apk add make git
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
+    apk add make git
 WORKDIR /src
 COPY . .
 
 RUN make build
 
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
+    apk --no-cache add ca-certificates
 
 RUN addgroup -g 1001 appgroup && \
   adduser -H -D -s /bin/false -G appgroup -u 1001 appuser

@@ -75,7 +75,7 @@ type Exporter struct {
 	client     HarborClient
 	opts       harborOpts
 	logger     log.Logger
-	kubeClient *kubernetes.Clientset
+	kubeClient KubeClient
 }
 
 type harborOpts struct {
@@ -93,6 +93,12 @@ type HarborClient struct {
 	client *http.Client
 	opts   harborOpts
 	logger log.Logger
+}
+
+type KubeClient struct {
+	client    *kubernetes.Clientset
+	config    *rest.Config
+	namespace string
 }
 
 func (h HarborClient) request(endpoint string) []byte {
@@ -231,24 +237,43 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 	)
 
 	// 初始化 kube-client
+	var kubeClient KubeClient
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		panic(err.Error())
 	}
+	kubeClient.config = config
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		panic(err.Error())
 	}
-
-	// TODO 得到storage的存储位置
-	configmapList, err := clientset.CoreV1().ConfigMaps("").List(metav1.ListOptions{})
+	kubeClient.client = clientset
+	// 得到exporter所在的命名空间
+	data, err := ioutil.ReadFile("/run/secrets/kubernetes.io/serviceaccount/namespace")
 	if err != nil {
-		panic(err.Error())
+		level.Error(logger).Log("msg", "Error to get namespace", "err", err)
+	}
+	kubeClient.namespace = string(data)
+
+	// 得到storage的存储位置
+	configmapList, err := clientset.CoreV1().ConfigMaps(kubeClient.namespace).List(metav1.ListOptions{})
+	if err != nil {
+		level.Error(logger).Log("msg", "Error getting storage location", "err", err)
 	}
 	for _, configMap := range configmapList.Items {
-		if strings.Contains(configMap.Name, "registry") {
-			registryConfig := configMap.Data["config.yml"]
-
+		if !strings.Contains(configMap.Name, "registry") {
+			continue
+		}
+		registryYaml := configMap.Data["config.yml"]
+		configSplit := strings.Split(registryYaml, ":")
+		for i, val := range configSplit {
+			if strings.Contains(val, "rootdirectory") {
+				opts.storage = configSplit[i+1]
+				break
+			}
+		}
+		if err != nil {
+			level.Error(logger).Log("msg", "Error getting storage location", "err", err)
 		}
 	}
 
@@ -257,7 +282,7 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		client:     hc,
 		opts:       opts,
 		logger:     logger,
-		kubeClient: clientset,
+		kubeClient: kubeClient,
 	}, nil
 }
 
@@ -265,13 +290,8 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 // implements prometheus.Collector.
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- up
-	// ch <- scanTotalCount
-	// ch <- scanCompletedCount
-	// ch <- scanRequesterCount
 	ch <- projectCount
 	ch <- repoCount
-	// ch <- quotasCount
-	// ch <- quotasSize
 	ch <- systemVolumes
 	ch <- repositoriesPullCount
 	ch <- repositoriesStarCount
@@ -283,9 +303,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Collect fetches the stats from configured Consul location and delivers them
 // as Prometheus metrics. It implements prometheus.Collector.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	// ok := e.collectScanMetric(ch)
 	ok := e.collectStatisticsMetric(ch)
-	// ok = e.collectQuotasMetric(ch) && ok
 	ok = e.collectSystemVolumesMetric(ch) && ok
 	ok = e.collectRepositoriesMetric(ch, e.opts.version) && ok
 	ok = e.collectReplicationsMetric(ch) && ok
@@ -350,14 +368,14 @@ func main() {
 	)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
-             <head><title>Harbor Exporter</title></head>
-             <body>
-             <h1>harbor Exporter</h1>
+			<head><title>Harbor Exporter</title></head>
+            <body>
+            <h1>harbor Exporter</h1>
              <p><a href='` + *metricsPath + `'>Metrics</a></p>
-             <h2>Build</h2>
-             <pre>` + version.Info() + ` ` + version.BuildContext() + `</pre>
-             </body>
-             </html>`))
+            <h2>Build</h2>
+            <pre>` + version.Info() + ` ` + version.BuildContext() + `</pre>
+            </body>
+            </html>`))
 	})
 	http.HandleFunc("/-/healthy", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

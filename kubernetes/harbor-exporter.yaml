@@ -1,3 +1,36 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: harbor-2
+  name: harbor-exporter-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: harbor-2
+  name: harbor-exporter-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: harbor-exporter-rolebinding
+  namespace: harbor-2
+subjects:
+  - kind: ServiceAccount
+    name: harbor-exporter-sa
+    namespace: harbor-2
+roleRef:
+  kind: Role
+  name: harbor-exporter-role
+  apiGroup: rbac.authorization.k8s.io
+
 ---
 kind: Service
 apiVersion: v1
@@ -5,6 +38,7 @@ metadata:
   name: harbor-exporter
   labels:
     app: harbor-exporter
+    prometheus: kube-prometheus
 spec:
   type: ClusterIP
   ports:
@@ -19,8 +53,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: harbor-exporter
+  namespace: harbor-2
   labels:
     app: harbor-exporter
+    prometheus: kube-prometheus
 spec:
   replicas: 1
   selector:
@@ -32,34 +68,35 @@ spec:
     metadata:
       labels:
         app: harbor-exporter
+        prometheus: kube-prometheus
     spec:
-      serviceAccountName: default
+      serviceAccountName: harbor-exporter-sa
       restartPolicy: Always
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
       containers:
         - name: harbor-exporter
-          image: "c4po/harbor-exporter"
-          imagePullPolicy: IfNotPresent
+          image: "reg.ebcpaas.com/xiechuyu/harbor_exporter:v0.5.0"
+          imagePullPolicy: Always
           env:
-##          necessary in case you monitor multiple Harbor instances in your Prometheus
-#            - name: HARBOR_INSTANCE
-#              value: my_harbor
+            ##          necessary in case you monitor multiple Harbor instances in your Prometheus
+            #            - name: HARBOR_INSTANCE
+            #              value: my_harbor
             - name: HARBOR_URI
-##            name of the Service for harbor-core
-              value: http://prefix-harbor-core # change prefix to the name of your Helm release
-##            optionally use below construction to address the external endpoint of Harbor
-#              valueFrom:
-#                configMapKeyRef:
-#                  name: prefix-harbor-core # change prefix to the name of your Helm release
-#                  key: EXT_ENDPOINT
+              ##            name of the Service for harbor-core
+              value: http://harbor-2-harbor-core # change prefix to the name of your Helm release
+            ##            optionally use below construction to address the external endpoint of Harbor
+            #              valueFrom:
+            #                configMapKeyRef:
+            #                  name: prefix-harbor-core # change prefix to the name of your Helm release
+            #                  key: EXT_ENDPOINT
             - name: HARBOR_USERNAME
               value: "admin"
             - name: HARBOR_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prefix-harbor-core # change prefix to the name of your Helm release
+                  name: harbor-2-harbor-core # change prefix to the name of your Helm release
                   key: HARBOR_ADMIN_PASSWORD
 
           securityContext:
@@ -112,18 +149,19 @@ metadata:
   name: harbor-exporter
   labels:
     app: harbor-exporter
+    prometheus: kube-prometheus
 spec:
   endpoints:
-  - interval: 10s
-    scrapeTimeout: 10s
-    honorLabels: true
-    port: http
-    path: /metrics
-    scheme: http
+    - interval: 10s
+      scrapeTimeout: 10s
+      honorLabels: true
+      port: http
+      path: /metrics
+      scheme: http
   jobLabel: "mgmt"
   selector:
     matchLabels:
       app: harbor-exporter
     namespaceSelector:
       matchNames:
-      - harbor # change to the namespace where you deployed Harbor
+        - harbor-2 # change to the namespace where you deployed Harbor
