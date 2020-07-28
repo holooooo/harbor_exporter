@@ -4,11 +4,17 @@ go 1.13
 
 require (
 	github.com/go-kit/kit v0.9.0
-	github.com/hashicorp/consul/api v1.3.0
-	github.com/hashicorp/go-cleanhttp v0.5.1
-	github.com/pkg/errors v0.8.1
+	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.4.0
 	github.com/prometheus/common v0.9.1
-	golang.org/x/net v0.0.0-20190613194153-d28f0bde5980
+	golang.org/x/net v0.0.0-20200707034311-ab3426394381
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
+	gopkg.in/yaml.v2 v2.3.0 // indirect
+	k8s.io/apimachinery v0.17.0
+	k8s.io/client-go v0.17.0 // indirect
+)
+
+replace (
+	k8s.io/api => k8s.io/api v0.17.0
+	k8s.io/apimachinery => k8s.io/apimachinery v0.17.0
 )

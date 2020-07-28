@@ -38,6 +38,11 @@ import (
 	"io/ioutil"
 	"strings"
 	"time"
+
+	// kubernetes
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -46,13 +51,8 @@ const (
 
 var (
 	up,
-	scanTotalCount,
-	scanCompletedCount,
-	scanRequesterCount,
 	projectCount,
 	repoCount,
-	quotasCount,
-	quotasSize,
 	systemVolumes,
 	repositoriesPullCount,
 	repositoriesStarCount,
@@ -72,9 +72,10 @@ func (l promHTTPLogger) Println(v ...interface{}) {
 // Exporter collects Consul stats from the given server and exports them using
 // the prometheus metrics package.
 type Exporter struct {
-	client HarborClient
-	opts   harborOpts
-	logger log.Logger
+	client     HarborClient
+	opts       harborOpts
+	logger     log.Logger
+	kubeClient *kubernetes.Clientset
 }
 
 type harborOpts struct {
@@ -85,6 +86,7 @@ type harborOpts struct {
 	timeout  time.Duration
 	insecure bool
 	version  string
+	storage  string
 }
 
 type HarborClient struct {
@@ -187,21 +189,6 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		"Was the last query of harbor successful.",
 		nil, nil,
 	)
-	scanTotalCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "scans_total"),
-		"metrics of the latest scan all process",
-		nil, nil,
-	)
-	scanCompletedCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "scans_completed"),
-		"metrics of the latest scan all process",
-		nil, nil,
-	)
-	scanRequesterCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "scans_requester"),
-		"metrics of the latest scan all process",
-		nil, nil,
-	)
 	projectCount = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, opts.instance, "project_count_total"),
 		"projects number relevant to the user",
@@ -211,16 +198,6 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		prometheus.BuildFQName(namespace, opts.instance, "repo_count_total"),
 		"repositories number relevant to the user",
 		[]string{"type"}, nil,
-	)
-	quotasCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "quotas_count_total"),
-		"quotas",
-		[]string{"type", "repo_name", "repo_id"}, nil,
-	)
-	quotasSize = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "quotas_size_bytes"),
-		"quotas",
-		[]string{"type", "repo_name", "repo_id"}, nil,
 	)
 	systemVolumes = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, opts.instance, "system_volumes_bytes"),
@@ -253,11 +230,34 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		[]string{"repl_pol_name", "result"}, nil,
 	)
 
+	// 初始化 kube-client
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// TODO 得到storage的存储位置
+	configmapList, err := clientset.CoreV1().ConfigMaps("").List(metav1.ListOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+	for _, configMap := range configmapList.Items {
+		if strings.Contains(configMap.Name, "registry") {
+			registryConfig := configMap.Data["config.yml"]
+
+		}
+	}
+
 	// Init our exporter.
 	return &Exporter{
-		client: hc,
-		opts:   opts,
-		logger: logger,
+		client:     hc,
+		opts:       opts,
+		logger:     logger,
+		kubeClient: clientset,
 	}, nil
 }
 
@@ -265,13 +265,13 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 // implements prometheus.Collector.
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- up
-	ch <- scanTotalCount
-	ch <- scanCompletedCount
-	ch <- scanRequesterCount
+	// ch <- scanTotalCount
+	// ch <- scanCompletedCount
+	// ch <- scanRequesterCount
 	ch <- projectCount
 	ch <- repoCount
-	ch <- quotasCount
-	ch <- quotasSize
+	// ch <- quotasCount
+	// ch <- quotasSize
 	ch <- systemVolumes
 	ch <- repositoriesPullCount
 	ch <- repositoriesStarCount
@@ -283,9 +283,9 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 // Collect fetches the stats from configured Consul location and delivers them
 // as Prometheus metrics. It implements prometheus.Collector.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
-	ok := e.collectScanMetric(ch)
-	ok = e.collectStatisticsMetric(ch) && ok
-	ok = e.collectQuotasMetric(ch) && ok
+	// ok := e.collectScanMetric(ch)
+	ok := e.collectStatisticsMetric(ch)
+	// ok = e.collectQuotasMetric(ch) && ok
 	ok = e.collectSystemVolumesMetric(ch) && ok
 	ok = e.collectRepositoriesMetric(ch, e.opts.version) && ok
 	ok = e.collectReplicationsMetric(ch) && ok
