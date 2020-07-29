@@ -11,7 +11,7 @@ metadata:
   name: harbor-exporter-role
 rules:
   - apiGroups: [""]
-    resources: ["pods", "configmaps"]
+    resources: ["pods", "configmaps", "secrets"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]

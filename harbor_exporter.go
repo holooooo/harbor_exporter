@@ -55,8 +55,9 @@ var (
 	repoCount,
 	systemVolumes,
 	repositoriesPullCount,
-	repositoriesStarCount,
+	repositoriesPushCount,
 	repositoriesTagsCount,
+	imagePullCount,
 	replicationStatus,
 	replicationTasks *prometheus.Desc
 )
@@ -76,6 +77,7 @@ type Exporter struct {
 	opts       harborOpts
 	logger     log.Logger
 	kubeClient KubeClient
+	pg         Postgres
 }
 
 type harborOpts struct {
@@ -99,6 +101,10 @@ type KubeClient struct {
 	client    *kubernetes.Clientset
 	config    *rest.Config
 	namespace string
+}
+
+type Postgres struct {
+	connStr string
 }
 
 func (h HarborClient) request(endpoint string) []byte {
@@ -215,8 +221,8 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		"Get public repositories which are accessed most.).",
 		[]string{"repo_name", "repo_id"}, nil,
 	)
-	repositoriesStarCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, opts.instance, "repositories_star_total"),
+	repositoriesPushCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, opts.instance, "repositories_push_total"),
 		"Get public repositories which are accessed most.).",
 		[]string{"repo_name", "repo_id"}, nil,
 	)
@@ -224,6 +230,11 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		prometheus.BuildFQName(namespace, opts.instance, "repositories_tags_total"),
 		"Get public repositories which are accessed most.).",
 		[]string{"repo_name", "repo_id"}, nil,
+	)
+	imagePullCount = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, opts.instance, "image_pull_count"),
+		"Get public image which are accessed most.).",
+		[]string{"repo_name", "repo_tag"}, nil,
 	)
 	replicationStatus = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, opts.instance, "replication_status"),
@@ -238,6 +249,7 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 
 	// 初始化 kube-client
 	var kubeClient KubeClient
+	var postgres Postgres
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		panic(err.Error())
@@ -255,25 +267,46 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 	}
 	kubeClient.namespace = string(data)
 
-	// 得到storage的存储位置
 	configmapList, err := clientset.CoreV1().ConfigMaps(kubeClient.namespace).List(metav1.ListOptions{})
 	if err != nil {
 		level.Error(logger).Log("msg", "Error getting storage location", "err", err)
 	}
 	for _, configMap := range configmapList.Items {
-		if !strings.Contains(configMap.Name, "registry") {
-			continue
-		}
-		registryYaml := configMap.Data["config.yml"]
-		configSplit := strings.Split(registryYaml, ":")
-		for i, val := range configSplit {
-			if strings.Contains(val, "rootdirectory") {
-				opts.storage = configSplit[i+1]
-				break
+		// 得到storage的存储位置
+		if strings.Contains(configMap.Name, "harbor-registry") {
+			registryYaml := configMap.Data["config.yml"]
+			configSplit := strings.Split(registryYaml, ":")
+			for i, val := range configSplit {
+				if strings.Contains(val, "rootdirectory") {
+					opts.storage = configSplit[i+1]
+					break
+				}
 			}
+			if err != nil {
+				level.Error(logger).Log("msg", "Error getting storage location", "err", err)
+			}
+		} else if strings.Contains(configMap.Name, "harbor-core") {
+			// 得到pg相关信息
+			postgres.connStr = "user=" + configMap.Data["POSTGRESQL_USERNAME"] +
+				" dbname=" + configMap.Data["POSTGRESQL_DATABASE"] +
+				" host=" + configMap.Data["POSTGRESQL_HOST"] +
+				" port=" + configMap.Data["POSTGRESQL_PORT"] +
+				" sslmode=" + configMap.Data["POSTGRESQL_SSLMODE"]
 		}
-		if err != nil {
-			level.Error(logger).Log("msg", "Error getting storage location", "err", err)
+	}
+
+	secretList, err := clientset.CoreV1().Secrets(kubeClient.namespace).List(metav1.ListOptions{})
+	if err != nil {
+		level.Error(logger).Log("msg", "Error getting postgres password", "err", err)
+	}
+	for _, secret := range secretList.Items {
+		if strings.Contains(secret.Name, "harbor-database") {
+			// password, err := base64.StdEncoding.DecodeString()
+			// if err != nil {
+			// 	level.Error(logger).Log("msg", "Error getting decode pg password", "err", err)
+			// }
+			postgres.connStr += " password=" + string(secret.Data["POSTGRES_PASSWORD"])
+			break
 		}
 	}
 
@@ -283,6 +316,7 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		opts:       opts,
 		logger:     logger,
 		kubeClient: kubeClient,
+		pg:         postgres,
 	}, nil
 }
 
@@ -294,8 +328,9 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- repoCount
 	ch <- systemVolumes
 	ch <- repositoriesPullCount
-	ch <- repositoriesStarCount
+	ch <- repositoriesPushCount
 	ch <- repositoriesTagsCount
+	ch <- imagePullCount
 	ch <- replicationStatus
 	ch <- replicationTasks
 }
