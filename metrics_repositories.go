@@ -9,7 +9,8 @@ import (
 )
 
 var (
-	queryAllRepo = `SELECT
+	queryAllRepo = `
+SELECT
     r.repository_id as repo_id,
     r.name as repo_name,
     r.pull_count as pull_count,
@@ -28,7 +29,8 @@ FROM
 	JOIN repository as r ON a.repo = r.name
 WHERE
 	r.repository_id = $1;`
-	queryImagePull = `SELECT
+	queryImagePull = `
+SELECT
 	a.repo as repo_name,
 	a.tag as tag_name,
 	count(al.log_id) as pull_count
@@ -41,6 +43,18 @@ WHERE
 GROUP BY
 	a.repo,
 	a.tag;`
+	queryProjectSize = `
+SELECT
+    p.name as project_name,
+    sum(b.size) as size
+FROM
+    blob AS b
+    JOIN artifact_blob AS ab ON ab.digest_blob = b.digest
+    JOIN artifact AS a ON a.digest = digest_af
+    JOIN repository AS r ON a.repo = r.name
+    JOIN project AS p ON r.project_id = p.project_id
+GROUP BY
+    p.name;`
 )
 
 func (e *Exporter) collectRepositoriesMetric(ch chan<- prometheus.Metric, version string) bool {
@@ -98,7 +112,26 @@ func (e *Exporter) collectRepositoriesMetric(ch chan<- prometheus.Metric, versio
 	for res.Next() {
 		res.Scan(&image.repo_name, &image.tag_name, &image.pull_count)
 		ch <- prometheus.MustNewConstMetric(
-			imagePullCount, prometheus.GaugeValue, image.pull_count, image.repo_name, image.tag_name)
+			imagePullCount, prometheus.GaugeValue, image.pull_count, image.repo_name, image.tag_name,
+		)
+	}
+
+	// 得到全部项目的占用空间
+	type Project struct {
+		project_name string
+		size         float64
+	}
+	res, err = db.Query(queryProjectSize)
+	if err != nil {
+		level.Error(e.client.logger).Log("msg", "Error get project size", "err", err)
+	}
+	project := &Project{}
+	var mb float64 = 1048576
+	for res.Next() {
+		res.Scan(&project.project_name, &project.size)
+		ch <- prometheus.MustNewConstMetric(
+			projectSize, prometheus.GaugeValue, project.size/mb, project.project_name,
+		)
 	}
 
 	return true

@@ -19,5 +19,4 @@ dockerbuild:
 	docker build --network host -t reg.ebcpaas.com/xiechuyu/harbor_exporter .
 
 dockerpush:
-	docker tag reg.ebcpaas.com/xiechuyu/harbor_exporter reg.ebcpaas.com/xiechuyu/harbor_exporter:v0.5.0 && \
- 	docker push reg.ebcpaas.com/xiechuyu/harbor_exporter:v0.5.0
+	docker push reg.ebcpaas.com/xiechuyu/harbor_exporter

@@ -60,6 +60,7 @@ var (
 	imagePullCount,
 	databaseHealth,
 	databaseConnections,
+	projectSize,
 	replicationStatus,
 	replicationTasks *prometheus.Desc
 )
@@ -249,6 +250,11 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		"Get Database connections count.).",
 		[]string{}, nil,
 	)
+	projectSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, opts.instance, "project_size"),
+		"Get Project all image size sum).",
+		[]string{"project_name"}, nil,
+	)
 	replicationStatus = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, opts.instance, "replication_status"),
 		"Get status of the last execution of this replication policy: Succeed = 1, any other status = 0.",
@@ -344,6 +350,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- imagePullCount
 	ch <- databaseHealth
 	ch <- databaseConnections
+	ch <- projectSize
 	ch <- replicationStatus
 	ch <- replicationTasks
 }
