@@ -26,10 +26,14 @@ make dockerbuild
 |harbor_up| | |
 |harbor_project_count_total| |type=[private_project, public_project, total_project]|
 |harbor_repo_count_total| |type=[private_repo, public_repo, total_repo]|
-|harbor_system_volumes_bytes| |storage=[free, total]|
-|harbor_repositories_pull_total| |repo_id, repo_name|
-|harbor_repositories_star_total| |repo_id, repo_name|
-|harbor_repositories_tags_total| |repo_id, repo_name|
+|harbor_system_volumes_bytes|当前存储空间的使用率(仅适用于filesystem)|storage=[free, total]|
+|harbor_repositories_pull_total|每一个repo的pull次数|repo_id, repo_name|
+|harbor_repositories_push_total|每一个repo的push次数|repo_id, repo_name|
+|harbor_repositories_tags_total|每一个repo的tag数量|repo_id, repo_name|
+|harbor_image_pull_count|每一个镜像的拉取次数|repo_name, repo_tag|
+|harbor_database_health|harbor数据库是否健康||
+|harbor_database_connections|harbor数据库的连接数||
+|harbor_project_size|项目使用的总磁盘空间|project_name|
 |harbor_replication_status|status of the last execution of this replication policy: Succeed = 1, any other status = 0|repl_pol_name|
 |harbor_replication_tasks|number of replication tasks, with various results, in the latest execution of this replication policy|repl_pol_name, result=[failed, succeed, in_progress, stopped]|
 
