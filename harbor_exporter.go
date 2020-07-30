@@ -58,6 +58,8 @@ var (
 	repositoriesPushCount,
 	repositoriesTagsCount,
 	imagePullCount,
+	databaseHealth,
+	databaseConnections,
 	replicationStatus,
 	replicationTasks *prometheus.Desc
 )
@@ -104,7 +106,8 @@ type KubeClient struct {
 }
 
 type Postgres struct {
-	connStr string
+	connStr         string
+	connPostgresStr string
 }
 
 func (h HarborClient) request(endpoint string) []byte {
@@ -236,6 +239,16 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		"Get public image which are accessed most.).",
 		[]string{"repo_name", "repo_tag"}, nil,
 	)
+	databaseHealth = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, opts.instance, "database_health"),
+		"Get if database alive.).",
+		[]string{}, nil,
+	)
+	databaseConnections = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, opts.instance, "database_connections"),
+		"Get Database connections count.).",
+		[]string{}, nil,
+	)
 	replicationStatus = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, opts.instance, "replication_status"),
 		"Get status of the last execution of this replication policy: Succeed = 1, any other status = 0.",
@@ -288,10 +301,11 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 		} else if strings.Contains(configMap.Name, "harbor-core") {
 			// 得到pg相关信息
 			postgres.connStr = "user=" + configMap.Data["POSTGRESQL_USERNAME"] +
-				" dbname=" + configMap.Data["POSTGRESQL_DATABASE"] +
 				" host=" + configMap.Data["POSTGRESQL_HOST"] +
 				" port=" + configMap.Data["POSTGRESQL_PORT"] +
 				" sslmode=" + configMap.Data["POSTGRESQL_SSLMODE"]
+			postgres.connPostgresStr = postgres.connStr + " dbname=postgres"
+			postgres.connStr += " dbname=" + configMap.Data["POSTGRESQL_DATABASE"]
 		}
 	}
 
@@ -301,11 +315,8 @@ func NewExporter(opts harborOpts, logger log.Logger) (*Exporter, error) {
 	}
 	for _, secret := range secretList.Items {
 		if strings.Contains(secret.Name, "harbor-database") {
-			// password, err := base64.StdEncoding.DecodeString()
-			// if err != nil {
-			// 	level.Error(logger).Log("msg", "Error getting decode pg password", "err", err)
-			// }
 			postgres.connStr += " password=" + string(secret.Data["POSTGRES_PASSWORD"])
+			postgres.connPostgresStr += " password=" + string(secret.Data["POSTGRES_PASSWORD"])
 			break
 		}
 	}
@@ -331,6 +342,8 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- repositoriesPushCount
 	ch <- repositoriesTagsCount
 	ch <- imagePullCount
+	ch <- databaseHealth
+	ch <- databaseConnections
 	ch <- replicationStatus
 	ch <- replicationTasks
 }
@@ -341,6 +354,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	ok := e.collectStatisticsMetric(ch)
 	ok = e.collectSystemVolumesMetric(ch) && ok
 	ok = e.collectRepositoriesMetric(ch, e.opts.version) && ok
+	ok = e.collectDatabaseMetric(ch) && ok
 	ok = e.collectReplicationsMetric(ch) && ok
 
 	if ok {
